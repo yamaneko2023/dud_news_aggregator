@@ -1,0 +1,13 @@
+# ニュース自動取得システム - 設定ファイルテンプレート
+#
+# このファイルを config.py にコピーして、実際の値を設定してください。
+# cp config.py.example config.py
+
+# Dify API設定
+DIFY_API_URL = "https://api.dify.ai/v1/chat-messages"
+DIFY_API_KEY = "app-xxxxxxxx"  # Dify Cloud で発行したAPIキーを設定
+
+# ニュース取得設定
+NEWS_GENRES = "AI,Claude Code,今井翔太"
+NEWS_MAX_ITEMS = 10
+NEWS_FETCH_TIMEOUT = 60  # 秒（Difyワークフロー完了まで待つため長めに設定）
