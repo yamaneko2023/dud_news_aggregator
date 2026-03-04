@@ -119,9 +119,14 @@ def backup_existing() -> None:
 
 
 def save_json(news: list) -> None:
-    """JSONをアトミックに書き込む"""
+    """JSONをラッパーオブジェクト形式でアトミックに書き込む"""
     items = news[:NEWS_MAX_ITEMS]
-    json_str = json.dumps(items, ensure_ascii=False, indent=2)
+    wrapper = {
+        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "count": len(items),
+        "items": items,
+    }
+    json_str = json.dumps(wrapper, ensure_ascii=False, indent=2)
 
     tmp_file = TARGET_FILE + ".tmp"
     try:
