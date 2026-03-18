@@ -3,7 +3,10 @@
 import json
 import logging
 import os
+import re
 import shutil
+import tarfile
+from collections import defaultdict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -55,6 +58,58 @@ class NewsStorage:
         shutil.copy2(self.target_file, backup_file)
         logger.info("Backup: %s", backup_file)
         return backup_file
+
+    def archive_previous_months(self) -> list[str]:
+        """前月以前のバックアップを月別ディレクトリに移動し、tar.gz 圧縮する。
+
+        今月分は対象外。戻り値は作成した .tar.gz のパスリスト。
+        """
+        if not os.path.isdir(self.data_dir):
+            return []
+
+        current_month = datetime.now().strftime("%Y-%m")
+        pattern = re.compile(r"tech_news_(\d{4}-\d{2})-\d{2}.*\.json$")
+
+        # Group backup files by year-month
+        month_groups: dict[str, list[str]] = defaultdict(list)
+        for fname in os.listdir(self.data_dir):
+            m = pattern.match(fname)
+            if m and m.group(1) != current_month:
+                month_groups[m.group(1)].append(fname)
+
+        created_archives: list[str] = []
+        for ym, files in sorted(month_groups.items()):
+            archive_path = os.path.join(self.data_dir, f"{ym}.tar.gz")
+
+            # Skip if archive already exists
+            if os.path.exists(archive_path):
+                logger.info("Archive already exists, skipping: %s", archive_path)
+                continue
+
+            month_dir = os.path.join(self.data_dir, ym)
+            os.makedirs(month_dir, exist_ok=True)
+
+            # Move files into month directory
+            for fname in files:
+                shutil.move(
+                    os.path.join(self.data_dir, fname),
+                    os.path.join(month_dir, fname),
+                )
+
+            # Create tar.gz
+            with tarfile.open(archive_path, "w:gz") as tar:
+                for fname in files:
+                    tar.add(os.path.join(month_dir, fname), arcname=fname)
+
+            # Remove month directory
+            shutil.rmtree(month_dir)
+
+            logger.info(
+                "Archived %d files → %s", len(files), archive_path
+            )
+            created_archives.append(archive_path)
+
+        return created_archives
 
     def load_existing(self) -> list[dict] | None:
         """Load existing news items. Returns None if file doesn't exist."""

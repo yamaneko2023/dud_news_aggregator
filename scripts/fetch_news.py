@@ -286,6 +286,7 @@ def main():
         storage = NewsStorage(data_dir=DATA_DIR)
         storage.backup()
         saved_path = storage.save(items, max_items=NEWS_MAX_ITEMS)
+        storage.archive_previous_months()
         logger.info("OK: %d articles saved to %s", len(items), saved_path)
 
     except Exception as e:

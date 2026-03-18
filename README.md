@@ -25,10 +25,11 @@ ArticleDeduplicator        ← URL重複排除 + タイトル類似排除
 NewsFormatter              ← OpenAI gpt-4o-mini or キーワード分類
     │
     ▼
-NewsStorage                ← アトミック書込み + バックアップ
+NewsStorage                ← アトミック書込み + バックアップ + 月別アーカイブ
     │
     ▼
 data/tech_news.json        ← 既存フォーマット互換
+data/YYYY-MM.tar.gz        ← 前月以前のバックアップを自動圧縮
 ```
 
 ## dud_hp_ver2 との関係
@@ -106,7 +107,7 @@ dud_news_aggregator/
 │   ├── formatter.py              # LLM整形 / キーワード分類
 │   ├── dedup.py                  # 重複排除 + ランキング
 │   ├── validator.py              # 出力バリデーション
-│   ├── storage.py                # JSON保存
+│   ├── storage.py                # JSON保存 + 月別アーカイブ
 │   └── keyword_optimizer/        # キーワード最適化サブモジュール
 │       ├── config_writer.py      # config.py 書き換え
 │       ├── cooccurrence.py       # 共起語分析
@@ -124,8 +125,9 @@ dud_news_aggregator/
 │   ├── test_cooccurrence.py
 │   ├── test_hatena_collector.py
 │   ├── test_merger.py
+│   ├── test_storage.py
 │   └── fixtures/
-├── data/                         # JSON出力先
+├── data/                         # JSON出力先 + 月別アーカイブ（YYYY-MM.tar.gz）
 └── logs/                         # 実行ログ
 ```
 
