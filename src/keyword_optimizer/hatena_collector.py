@@ -1,5 +1,7 @@
 """Collect trending tech keywords from Hatena Bookmark IT hotentry RSS."""
 
+from __future__ import annotations
+
 import logging
 import re
 from collections import Counter

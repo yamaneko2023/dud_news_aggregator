@@ -1,5 +1,7 @@
 """Build composite search queries from NEWS_SEARCH_CONFIGS."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 

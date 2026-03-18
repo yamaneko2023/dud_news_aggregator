@@ -1,5 +1,7 @@
 """Config file backup and atomic write for NEWS_SEARCH_CONFIGS."""
 
+from __future__ import annotations
+
 import importlib
 import json
 import logging

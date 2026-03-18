@@ -15,6 +15,8 @@ cron例:
     0 9,18 * * * /usr/bin/python3 /path/to/scripts/fetch_news.py >> /path/to/logs/news_fetch.log 2>&1
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
@@ -25,20 +27,17 @@ from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
-from config.config import (
-    GOOGLE_NEWS_ENABLED,
-    GOOGLE_NEWS_MAX_PER_GENRE,
-    LLM_API_KEY,
-    LLM_MODEL,
-    LLM_PROVIDER,
-    NEWS_DAYS,
-    NEWS_MAX_ITEMS,
-    RSS_FEEDS,
-)
-
-# Optional config values with defaults for backward compatibility
 import config.config as _cfg
 
+# All config values with defaults for backward compatibility
+NEWS_MAX_ITEMS = getattr(_cfg, "NEWS_MAX_ITEMS", 10)
+NEWS_DAYS = getattr(_cfg, "NEWS_DAYS", 7)
+LLM_PROVIDER = getattr(_cfg, "LLM_PROVIDER", "none")
+LLM_API_KEY = getattr(_cfg, "LLM_API_KEY", "")
+LLM_MODEL = getattr(_cfg, "LLM_MODEL", "gpt-4o-mini")
+GOOGLE_NEWS_ENABLED = getattr(_cfg, "GOOGLE_NEWS_ENABLED", True)
+GOOGLE_NEWS_MAX_PER_GENRE = getattr(_cfg, "GOOGLE_NEWS_MAX_PER_GENRE", 5)
+RSS_FEEDS = getattr(_cfg, "RSS_FEEDS", [])
 NEWS_SEARCH_CONFIGS = getattr(_cfg, "NEWS_SEARCH_CONFIGS", None)
 NEWS_GENRES = getattr(_cfg, "NEWS_GENRES", "")
 OUTPUT_WEB_RATIO = getattr(_cfg, "OUTPUT_WEB_RATIO", 7)

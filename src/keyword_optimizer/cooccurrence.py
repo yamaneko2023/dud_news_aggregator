@@ -1,5 +1,7 @@
 """Co-occurrence analysis on past news titles using janome tokenizer."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os

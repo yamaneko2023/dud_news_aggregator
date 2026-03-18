@@ -1,5 +1,7 @@
 """News source base classes and data models."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime

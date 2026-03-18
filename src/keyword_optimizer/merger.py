@@ -1,5 +1,7 @@
 """Merge new keyword candidates into existing NEWS_SEARCH_CONFIGS."""
 
+from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger(__name__)

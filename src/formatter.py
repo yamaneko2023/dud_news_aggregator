@@ -1,5 +1,7 @@
 """News formatting with LLM (OpenAI gpt-4o-mini) or keyword-based fallback."""
 
+from __future__ import annotations
+
 import json
 import logging
 import re

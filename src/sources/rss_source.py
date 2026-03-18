@@ -1,5 +1,7 @@
 """Direct RSS feed source for tech news sites."""
 
+from __future__ import annotations
+
 import logging
 
 import feedparser

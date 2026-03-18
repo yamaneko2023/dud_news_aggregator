@@ -1,5 +1,7 @@
 """Article deduplication and ranking."""
 
+from __future__ import annotations
+
 import unicodedata
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse

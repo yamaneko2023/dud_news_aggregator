@@ -15,6 +15,8 @@ cron例:
     0 7 * * * /usr/bin/python3 /path/to/scripts/optimize_keywords.py --apply >> /path/to/logs/optimize.log 2>&1
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging

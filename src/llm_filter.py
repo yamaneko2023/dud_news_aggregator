@@ -1,5 +1,7 @@
 """LLM-based relevance filter using gpt-4o-mini batch judgment."""
 
+from __future__ import annotations
+
 import json
 import logging
 
