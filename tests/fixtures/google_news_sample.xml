@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:media="http://search.yahoo.com/mrss/" version="2.0">
+  <channel>
+    <title>AI - Google ニュース</title>
+    <link>https://news.google.com</link>
+    <description>Google ニュース</description>
+    <item>
+      <title>AIが変える未来の働き方 最新トレンドまとめ - ITmedia</title>
+      <link>https://www.itmedia.co.jp/ai/article/2026/03/15/001.html</link>
+      <pubDate>Sat, 15 Mar 2026 09:00:00 GMT</pubDate>
+      <description>人工知能の最新動向について解説する記事です。</description>
+    </item>
+    <item>
+      <title>Claude Codeが開発現場を変革 新機能を徹底解説 - Publickey</title>
+      <link>https://www.publickey1.jp/blog/26/claude_code.html</link>
+      <pubDate>Fri, 14 Mar 2026 12:00:00 GMT</pubDate>
+      <description>Anthropicが提供するClaude Codeの新機能について。</description>
+    </item>
+    <item>
+      <title>AI活用で業務効率を劇的改善した企業事例5選 - 日経クロステック</title>
+      <link>https://xtech.nikkei.com/ai/article/2026/03/13/001.html</link>
+      <pubDate>Thu, 13 Mar 2026 08:30:00 GMT</pubDate>
+      <description>AI導入で業務効率化に成功した企業の事例を紹介。</description>
+    </item>
+    <item>
+      <title>【解説】今井翔太氏が語るAI研究の最前線 - YouTube</title>
+      <link>https://www.youtube.com/watch?v=abc123</link>
+      <pubDate>Wed, 12 Mar 2026 15:00:00 GMT</pubDate>
+      <description>今井翔太氏による最新AI研究の解説動画。</description>
+    </item>
+    <item>
+      <title>重複記事：AIが変える未来の働き方 最新トレンド - ITmedia</title>
+      <link>https://www.itmedia.co.jp/ai/article/2026/03/15/001.html?ref=rss</link>
+      <pubDate>Sat, 15 Mar 2026 09:30:00 GMT</pubDate>
+      <description>同じ記事の別フィード経由。</description>
+    </item>
+  </channel>
+</rss>
