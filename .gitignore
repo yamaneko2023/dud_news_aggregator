@@ -1,4 +1,5 @@
 config/config.py
+config/keyword_suggestions.json
 data/*.json
 data/*.json.tmp
 logs/*.log
