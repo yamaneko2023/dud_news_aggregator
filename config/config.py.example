@@ -1,13 +1,61 @@
 # ニュース自動取得システム - 設定ファイルテンプレート
 #
 # このファイルを config.py にコピーして、実際の値を設定してください。
-# cp config.py.example config.py
+# cp config/config.py.example config/config.py
 
-# Dify API設定
-DIFY_API_URL = "https://api.dify.ai/v1/chat-messages"
-DIFY_API_KEY = "app-xxxxxxxx"  # Dify Cloud で発行したAPIキーを設定
-
-# ニュース取得設定
-NEWS_GENRES = "AI,Claude Code,今井翔太"
+# --- ニュース取得設定 ---
 NEWS_MAX_ITEMS = 10
-NEWS_FETCH_TIMEOUT = 60  # 秒（Difyワークフロー完了まで待つため長めに設定）
+NEWS_DAYS = 7
+
+# --- 検索設定（ジャンル複合クエリ） ---
+# NEWS_SEARCH_CONFIGS が定義されていれば優先、未定義なら NEWS_GENRES からフォールバック
+NEWS_SEARCH_CONFIGS = [
+    {
+        "genre": "テクノロジー",
+        "keywords": ["AI", "人工知能"],
+        "synonyms": ["生成AI", "機械学習", "LLM"],
+        "exclude": ["ラブライブ", "踊ってみた", "歌ってみた", "アイドル"],
+        "youtube": True,
+    },
+    {
+        "genre": "テクノロジー",
+        "keywords": ["Claude Code"],
+        "synonyms": ["Anthropic Claude"],
+        "exclude": [],
+        "youtube": True,
+    },
+    {
+        "genre": "",
+        "keywords": ["今井翔太"],
+        "synonyms": ["今井翔太 AI"],
+        "exclude": [],
+        "youtube": True,
+    },
+]
+
+# 旧設定（後方互換: NEWS_SEARCH_CONFIGS 未定義時のフォールバック用）
+NEWS_GENRES = "AI,Claude Code,今井翔太"
+
+# --- Google News RSS設定 ---
+GOOGLE_NEWS_ENABLED = True
+GOOGLE_NEWS_MAX_PER_GENRE = 5  # ジャンルごとの最大取得件数
+
+# --- WEB:YouTube 表示割合 ---
+OUTPUT_WEB_RATIO = 7   # WEB記事の件数
+OUTPUT_YT_RATIO = 3    # YouTube動画の件数
+# → NEWS_MAX_ITEMS=10 の場合、WEB 7件 + YouTube 3件
+
+# --- コンテンツフィルタ ---
+CONTENT_FILTER_ENABLED = True
+
+# --- 直接RSSフィード設定 ---
+RSS_FEEDS = [
+    {"url": "https://rss.itmedia.co.jp/rss/2.0/ait.xml", "name": "ITmedia AI+"},
+    {"url": "https://www.publickey1.jp/atom.xml", "name": "Publickey"},
+    {"url": "https://gigazine.net/news/rss_2.0/", "name": "GIGAZINE"},
+]
+
+# --- LLM設定 ---
+LLM_PROVIDER = "none"  # "openai" or "none"（none時はキーワードベース簡易分類）
+LLM_API_KEY = ""  # OpenAI API key（LLM_PROVIDER="openai" の場合に設定）
+LLM_MODEL = "gpt-4o-mini"

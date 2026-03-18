@@ -1,166 +1,295 @@
 #!/usr/bin/env python3
 """
-ニュース自動取得スクリプト（cron実行用）
+ニュース自動取得スクリプト v3（ジャンル複合クエリ + ノイズフィルタリング）
 
-Dify Advanced Chat API経由でTavilyニュースを取得し、JSONに保存する。
-エラー時は既存データを上書きしない安全設計。
+Google News RSS + 直接RSS から日本語ニュースを取得し、
+コンテンツフィルタ → 重複排除 → LLMフィルタ → WEB:YT割合制御 → 整形 → JSON保存。
 
 Usage:
-    python scripts/fetch_news.py
+    python scripts/fetch_news.py               # 通常実行
+    python scripts/fetch_news.py --dry-run      # 取得のみ、保存しない
+    python scripts/fetch_news.py --no-llm       # LLMなしフォールバック
+    python scripts/fetch_news.py --source google  # 特定ソースのみ
 
 cron例:
     0 9,18 * * * /usr/bin/python3 /path/to/scripts/fetch_news.py >> /path/to/logs/news_fetch.log 2>&1
 """
 
-import json
+import argparse
+import logging
 import os
-import shutil
 import sys
 from datetime import datetime
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 
-# config読み込み
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Project root setup
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+
 from config.config import (
-    DIFY_API_URL,
-    DIFY_API_KEY,
-    NEWS_GENRES,
+    GOOGLE_NEWS_ENABLED,
+    GOOGLE_NEWS_MAX_PER_GENRE,
+    LLM_API_KEY,
+    LLM_MODEL,
+    LLM_PROVIDER,
+    NEWS_DAYS,
     NEWS_MAX_ITEMS,
-    NEWS_FETCH_TIMEOUT,
+    RSS_FEEDS,
 )
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Optional config values with defaults for backward compatibility
+import config.config as _cfg
+
+NEWS_SEARCH_CONFIGS = getattr(_cfg, "NEWS_SEARCH_CONFIGS", None)
+NEWS_GENRES = getattr(_cfg, "NEWS_GENRES", "")
+OUTPUT_WEB_RATIO = getattr(_cfg, "OUTPUT_WEB_RATIO", 7)
+OUTPUT_YT_RATIO = getattr(_cfg, "OUTPUT_YT_RATIO", 3)
+CONTENT_FILTER_ENABLED = getattr(_cfg, "CONTENT_FILTER_ENABLED", True)
+
+from src.content_filter import ContentFilter
+from src.dedup import ArticleDeduplicator
+from src.formatter import NewsFormatter
+from src.llm_filter import LLMFilter
+from src.query_builder import SearchQuery, build_queries, build_queries_from_genres
+from src.sources.base import RawArticle
+from src.sources.google_news import GoogleNewsSource
+from src.sources.rss_source import RssSource
+from src.storage import NewsStorage
+from src.validator import validate_news_items
+
 DATA_DIR = os.path.join(BASE_DIR, "data")
-TARGET_FILE = os.path.join(DATA_DIR, "tech_news.json")
+
+# Logging
+logging.basicConfig(
+    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger("fetch_news")
 
 
-def log(message: str) -> None:
-    """タイムスタンプ付きログ出力"""
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Fetch and format news articles")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Fetch and format only, do not save",
+    )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Use keyword-based fallback instead of LLM",
+    )
+    parser.add_argument(
+        "--source",
+        choices=["google", "rss", "all"],
+        default="all",
+        help="Which source to use (default: all)",
+    )
+    return parser.parse_args()
 
 
-def fetch_from_dify() -> str:
-    """Dify Advanced Chat APIを呼び出してニュースを取得"""
-    payload = json.dumps({
-        "inputs": {},
-        "query": NEWS_GENRES,
-        "response_mode": "blocking",
-        "conversation_id": "",
-        "user": "hp-news-fetcher",
-    }).encode("utf-8")
+def get_search_queries() -> list[SearchQuery]:
+    """Build search queries from config, with fallback to legacy NEWS_GENRES."""
+    if NEWS_SEARCH_CONFIGS:
+        return build_queries(NEWS_SEARCH_CONFIGS)
+    elif NEWS_GENRES:
+        logger.info("Using legacy NEWS_GENRES fallback")
+        return build_queries_from_genres(NEWS_GENRES)
+    else:
+        logger.warning("No search configuration found")
+        return []
 
-    req = Request(
-        DIFY_API_URL,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {DIFY_API_KEY}",
-            "User-Agent": "DUD-NewsAggregator/1.0",
-        },
-        method="POST",
+
+def fetch_articles(
+    queries: list[SearchQuery],
+    source_filter: str,
+    max_per_query: int,
+) -> list[RawArticle]:
+    """Fetch articles from all enabled sources using SearchQuery objects."""
+    articles: list[RawArticle] = []
+    errors: list[str] = []
+
+    # Google News RSS
+    if source_filter in ("google", "all") and GOOGLE_NEWS_ENABLED:
+        try:
+            source = GoogleNewsSource(days=NEWS_DAYS)
+            google_articles = source.fetch_by_queries(queries, max_per_query)
+            articles.extend(google_articles)
+            logger.info("Google News: %d articles total", len(google_articles))
+        except Exception as e:
+            errors.append(f"Google News: {e}")
+            logger.exception("Google News source failed")
+
+    # Direct RSS feeds (unchanged - genre matching is handled internally)
+    if source_filter in ("rss", "all") and RSS_FEEDS:
+        try:
+            # Extract unique genre labels for RSS keyword matching
+            genres = list(dict.fromkeys(q.genre_label for q in queries))
+            source = RssSource(feeds=RSS_FEEDS)
+            rss_articles = source.fetch(genres, max_per_query)
+            articles.extend(rss_articles)
+            logger.info("RSS: %d articles total", len(rss_articles))
+        except Exception as e:
+            errors.append(f"RSS: {e}")
+            logger.exception("RSS source failed")
+
+    if not articles and errors:
+        raise RuntimeError(
+            f"All sources failed: {'; '.join(errors)}"
+        )
+
+    return articles
+
+
+def apply_mix_ratio(
+    articles: list[RawArticle],
+    web_ratio: int,
+    yt_ratio: int,
+    max_items: int,
+) -> list[RawArticle]:
+    """Apply WEB:YouTube mix ratio to article list.
+
+    Args:
+        articles: Ranked articles (already deduped/filtered)
+        web_ratio: Target ratio for web articles (e.g. 7)
+        yt_ratio: Target ratio for YouTube articles (e.g. 3)
+        max_items: Total max output items
+
+    Returns:
+        Mixed list respecting the ratio, filling gaps from the other type.
+    """
+    web = [a for a in articles if a.content_type != "youtube"]
+    yt = [a for a in articles if a.content_type == "youtube"]
+
+    total_ratio = web_ratio + yt_ratio
+    target_web = round(max_items * web_ratio / total_ratio)
+    target_yt = max_items - target_web
+
+    # Actual counts limited by availability
+    actual_yt = min(len(yt), target_yt)
+    actual_web = min(len(web), max_items - actual_yt)
+    # If web couldn't fill, give extra slots to yt
+    actual_yt = min(len(yt), max_items - actual_web)
+
+    result = web[:actual_web] + yt[:actual_yt]
+
+    logger.info(
+        "Mix ratio: WEB %d/%d, YouTube %d/%d (target %d:%d)",
+        actual_web, len(web), actual_yt, len(yt), web_ratio, yt_ratio,
     )
 
-    try:
-        with urlopen(req, timeout=NEWS_FETCH_TIMEOUT) as resp:
-            body = resp.read().decode("utf-8")
-    except HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")[:200]
-        raise RuntimeError(f"Dify API error: HTTP {e.code} - {error_body}")
-    except URLError as e:
-        raise RuntimeError(f"Connection error: {e.reason}")
-
-    data = json.loads(body)
-
-    answer = data.get("answer")
-    if not answer:
-        raise RuntimeError(f"No answer in Dify response: {json.dumps(data, ensure_ascii=False)[:300]}")
-
-    return answer
+    return result
 
 
-def validate_news(raw_answer: str) -> list:
-    """LLM応答からJSON配列を抽出・バリデーション"""
-    # LLMがマークダウンコードブロックで囲む場合に対応
-    text = raw_answer.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # 先頭の ```json や ``` を除去
-        lines = lines[1:]
-        # 末尾の ``` を除去
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
+def fetch_and_format(
+    queries: list[SearchQuery],
+    source_filter: str = "all",
+    use_llm: bool = True,
+    max_items: int = NEWS_MAX_ITEMS,
+    web_ratio: int = OUTPUT_WEB_RATIO,
+    yt_ratio: int = OUTPUT_YT_RATIO,
+    filter_enabled: bool = CONTENT_FILTER_ENABLED,
+) -> list[dict]:
+    """Main pipeline: query build -> fetch -> filter -> dedup -> LLM filter -> mix -> format -> validate."""
+    max_per_query = GOOGLE_NEWS_MAX_PER_GENRE
 
-    news = json.loads(text)
+    # 1. Fetch from all sources
+    raw_articles = fetch_articles(queries, source_filter, max_per_query)
+    logger.info("Total raw articles: %d", len(raw_articles))
 
-    if not isinstance(news, list) or len(news) == 0:
-        raise RuntimeError("Result is not a valid JSON array or is empty")
+    if not raw_articles:
+        logger.warning("No articles fetched")
+        return []
 
-    required = ["id", "date", "category", "title", "link"]
-    first = news[0]
-    for field in required:
-        if field not in first:
-            raise RuntimeError(f"Missing required field: {field}")
+    # 2. Content filter (noise removal)
+    if filter_enabled:
+        content_filter = ContentFilter()
+        filtered = content_filter.apply(raw_articles)
+    else:
+        filtered = raw_articles
 
-    return news
+    # 3. Deduplicate and rank
+    deduplicator = ArticleDeduplicator()
+    deduped = deduplicator.process(filtered, max_items=max_items * 2)
+    logger.info("After dedup: %d articles", len(deduped))
 
+    # 4. LLM relevance filter (optional)
+    llm_provider = LLM_PROVIDER if use_llm else "none"
+    if llm_provider == "openai" and LLM_API_KEY:
+        llm_filter = LLMFilter(api_key=LLM_API_KEY, model=LLM_MODEL)
+        deduped = llm_filter.filter(deduped)
 
-def backup_existing() -> None:
-    """既存ファイルを日時付きでバックアップ"""
-    if not os.path.exists(TARGET_FILE):
-        return
+    # 5. Apply WEB:YouTube mix ratio
+    mixed = apply_mix_ratio(deduped, web_ratio, yt_ratio, max_items)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    backup_file = os.path.join(DATA_DIR, f"tech_news_{timestamp}.json")
+    # 6. Format with LLM or keyword fallback
+    formatter = NewsFormatter(
+        llm_provider=llm_provider,
+        api_key=LLM_API_KEY,
+        model=LLM_MODEL,
+    )
+    formatted = formatter.format(mixed)
+    logger.info("Formatted: %d items", len(formatted))
 
-    shutil.copy2(TARGET_FILE, backup_file)
-    log(f"Backup: {backup_file}")
+    # 7. Validate
+    validated = validate_news_items(formatted)
+    logger.info("Validated: %d items", len(validated))
 
-
-def save_json(news: list) -> None:
-    """JSONをラッパーオブジェクト形式でアトミックに書き込む"""
-    items = news[:NEWS_MAX_ITEMS]
-    wrapper = {
-        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "count": len(items),
-        "items": items,
-    }
-    json_str = json.dumps(wrapper, ensure_ascii=False, indent=2)
-
-    tmp_file = TARGET_FILE + ".tmp"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            f.write(json_str + "\n")
-        os.replace(tmp_file, TARGET_FILE)
-    except Exception:
-        if os.path.exists(tmp_file):
-            os.remove(tmp_file)
-        raise
+    return validated[:max_items]
 
 
 def main():
+    args = parse_args()
+
+    # Build search queries
+    queries = get_search_queries()
+    if not queries:
+        logger.error("No search queries configured")
+        sys.exit(1)
+
+    logger.info(
+        "Start: %d queries, source=%s, dry_run=%s, no_llm=%s",
+        len(queries), args.source, args.dry_run, args.no_llm,
+    )
+
     try:
-        log(f"Start: genres={NEWS_GENRES}")
+        # Run pipeline
+        items = fetch_and_format(
+            queries=queries,
+            source_filter=args.source,
+            use_llm=not args.no_llm,
+            max_items=NEWS_MAX_ITEMS,
+        )
 
-        # 1. Dify APIからニュース取得
-        answer = fetch_from_dify()
-        log("Dify API response received")
+        if not items:
+            logger.error("No articles produced")
+            sys.exit(1)
 
-        # 2. バリデーション
-        news = validate_news(answer)
-        log(f"Validated: {len(news)} articles")
+        # Display results
+        for item in items:
+            logger.info(
+                "  [%s] %s - %s (%s) [%s]",
+                item["category"],
+                item["date"],
+                item["title"],
+                item["source"],
+                item["type"],
+            )
 
-        # 3. 既存ファイルのバックアップ
-        backup_existing()
+        if args.dry_run:
+            logger.info("Dry run: %d items (not saved)", len(items))
+            import json
+            print(json.dumps(items, ensure_ascii=False, indent=2))
+            return
 
-        # 4. JSON保存（アトミック書き込み）
-        save_json(news)
-        saved_count = min(len(news), NEWS_MAX_ITEMS)
-        log(f"OK: {saved_count} articles saved to {TARGET_FILE}")
+        # Save
+        storage = NewsStorage(data_dir=DATA_DIR)
+        storage.backup()
+        saved_path = storage.save(items, max_items=NEWS_MAX_ITEMS)
+        logger.info("OK: %d articles saved to %s", len(items), saved_path)
 
     except Exception as e:
-        log(f"ERROR: {e}")
+        logger.error("ERROR: %s", e)
         sys.exit(1)
 
 
