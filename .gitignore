@@ -1,5 +1,9 @@
 config/config.py
+config/keyword_suggestions.json
 data/*.json
 data/*.json.tmp
+data/*.tar.gz
 logs/*.log
 __pycache__/
+*.pyc
+.pytest_cache/
